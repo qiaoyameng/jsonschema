@@ -143,6 +143,72 @@ Here for instance is an example which validates that instances are JSON objects 
     validator.validate({"foo": 37})
     assert not validator.is_valid({"foo": -37})  # Uh oh!
 
+Identifying Schemas Which Have No ``$id``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Schemas loaded into memory often do not contain an :kw:`$id` keyword, even though they refer to other schemas via relative references like ``{"$ref": "common.json#/$defs/item"}``.
+Without an ``$id``, there is no URI for such a reference to resolve against, so previously the only options were to add an ``$id`` to the schema yourself or to reach into resolver internals.
+
+All validators accept a ``base_uri`` argument for this case.
+It externally associates a URI with the schema you pass in -- essentially telling the validator "pretend this schema was retrieved from this URI" -- without modifying the schema in any way:
+
+.. testcode::
+
+    from referencing import Registry
+    from referencing.jsonschema import DRAFT202012
+
+    from jsonschema import Draft202012Validator
+
+    # The same file name in two different directories, with different
+    # contents, registered under two different URIs:
+    registry = Registry().with_resources(
+        [
+            (
+                "file:///schemas/one/common.json",
+                DRAFT202012.create_resource(
+                    {"$defs": {"item": {"type": "integer"}}},
+                ),
+            ),
+            (
+                "file:///schemas/two/common.json",
+                DRAFT202012.create_resource(
+                    {"$defs": {"item": {"type": "string"}}},
+                ),
+            ),
+        ],
+    )
+
+    schema = {"$ref": "common.json#/$defs/item"}  # no $id anywhere!
+
+    first = Draft202012Validator(
+        schema,
+        base_uri="file:///schemas/one/root.json",
+        registry=registry,
+    )
+    second = Draft202012Validator(
+        schema,
+        base_uri="file:///schemas/two/root.json",
+        registry=registry,
+    )
+
+    assert first.is_valid(37) and not first.is_valid("foo")
+    assert second.is_valid("foo") and not second.is_valid(37)
+
+Each validator resolves ``common.json`` against its own ``base_uri``, so the two same-named resources stay isolated from one another, and the schema itself is never mutated.
+
+Some further details worth knowing:
+
+    * ``base_uri`` only provides a *starting point* for resolution.
+      If the schema (or any subschema within it) contains an :kw:`$id`, that ``$id`` takes precedence and becomes the new base URI, exactly as the JSON Schema specification requires -- ``$id`` always wins over ``base_uri``.
+
+    * Once a reference crosses into another resource, further relative references within that resource resolve against *that* resource's base URI, not against the original ``base_uri``.
+
+    * The URI is normalized as references are resolved against it (e.g. ``..`` segments are resolved per :rfc:`3986`), and any fragment it contains is ignored.
+
+    * The argument is carried along by `Validator.evolve <jsonschema.protocols.Validator.evolve>` and across references into resources written for other drafts of the specification, and dynamic scope (for :kw:`$dynamicRef`) extends to the identified root schema as well.
+
+    * ``base_uri`` is understood only by the modern `referencing.Registry`-based implementation; it has no effect when combined with the deprecated ``RefResolver``.
+
 .. _ref-filesystem:
 
 Resolving References from the File System

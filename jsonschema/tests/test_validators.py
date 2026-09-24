@@ -2333,6 +2333,302 @@ class TestReferencing(TestCase):
         self.assertFalse(w)
 
 
+class TestBaseURI(TestCase):
+    """
+    Tests for the ``base_uri`` argument, which identifies anonymous schemas.
+    """
+
+    def registry_with_common(self, **directories):
+        return referencing.Registry().with_resources(
+            (f"file:///{directory}/common.json", resource)
+            for directory, resource in directories.items()
+        )
+
+    def test_same_named_resources_are_isolated_by_base_uri(self):
+        registry = self.registry_with_common(
+            one=DRAFT202012.create_resource(
+                {"$defs": {"item": {"type": "integer"}}},
+            ),
+            two=DRAFT202012.create_resource(
+                {"$defs": {"item": {"type": "string"}}},
+            ),
+        )
+        schema = {"$ref": "common.json#/$defs/item"}
+
+        first = validators.Draft202012Validator(
+            schema,
+            base_uri="file:///one/root.json",
+            registry=registry,
+        )
+        second = validators.Draft202012Validator(
+            schema,
+            base_uri="file:///two/root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (first.is_valid(37), first.is_valid("foo")),
+            (True, False),
+        )
+        self.assertEqual(
+            (second.is_valid(37), second.is_valid("foo")),
+            (False, True),
+        )
+
+    def test_base_uri_does_not_modify_the_schema(self):
+        registry = self.registry_with_common(
+            dir=DRAFT202012.create_resource({"type": "integer"}),
+        )
+        schema = {"$ref": "common.json"}
+
+        validators.Draft202012Validator(
+            schema,
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        ).validate(37)
+
+        self.assertEqual(schema, {"$ref": "common.json"})
+
+    def test_base_uri_is_normalized_when_resolving(self):
+        registry = self.registry_with_common(
+            schemas=DRAFT202012.create_resource({"type": "integer"}),
+        )
+        validator = validators.Draft202012Validator(
+            {"$ref": "common.json"},
+            base_uri="file:///schemas/nested/../root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_base_uri_may_have_an_empty_fragment(self):
+        registry = self.registry_with_common(
+            dir=DRAFT202012.create_resource({"type": "integer"}),
+        )
+        validator = validators.Draft202012Validator(
+            {"$ref": "common.json"},
+            base_uri="file:///dir/root.json#",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_fragment_only_references_resolve_within_the_root(self):
+        validator = validators.Draft202012Validator(
+            {
+                "$defs": {"item": {"type": "integer"}},
+                "$ref": "#/$defs/item",
+            },
+            base_uri="file:///dir/root.json",
+            registry=referencing.Registry(),
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_missing_reference_target_raises(self):
+        validator = validators.Draft202012Validator(
+            {"$ref": "missing.json"},
+            base_uri="file:///dir/root.json",
+            registry=referencing.Registry(),
+        )
+
+        with self.assertRaises(referencing.exceptions.Unresolvable):
+            validator.validate(37)
+
+    def test_id_in_the_root_takes_precedence_over_base_uri(self):
+        registry = referencing.Registry().with_resources(
+            [
+                (
+                    "https://example.com/schemas/common.json",
+                    DRAFT202012.create_resource(
+                        {"$defs": {"item": {"type": "integer"}}},
+                    ),
+                ),
+                (
+                    "file:///dir/common.json",
+                    DRAFT202012.create_resource(
+                        {"$defs": {"item": {"type": "string"}}},
+                    ),
+                ),
+            ],
+        )
+        validator = validators.Draft202012Validator(
+            {
+                "$id": "https://example.com/schemas/root.json",
+                "$ref": "common.json#/$defs/item",
+            },
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_subschema_ids_rebase_relative_to_base_uri(self):
+        registry = referencing.Registry().with_resource(
+            "file:///dir/sub/common.json",
+            DRAFT202012.create_resource({"type": "integer"}),
+        )
+        validator = validators.Draft202012Validator(
+            {"properties": {"foo": {"$id": "sub/", "$ref": "common.json"}}},
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (
+                validator.is_valid({"foo": 37}),
+                validator.is_valid({"foo": "no"}),
+            ),
+            (True, False),
+        )
+
+    def test_referenced_resources_resolve_against_their_own_base(self):
+        registry = referencing.Registry().with_resources(
+            [
+                (
+                    "file:///lib/common.json",
+                    DRAFT202012.create_resource({"$ref": "inner.json"}),
+                ),
+                (
+                    "file:///lib/inner.json",
+                    DRAFT202012.create_resource({"type": "integer"}),
+                ),
+            ],
+        )
+        validator = validators.Draft202012Validator(
+            {"$ref": "../lib/common.json"},
+            base_uri="file:///app/root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_evolve_preserves_base_uri(self):
+        registry = self.registry_with_common(
+            dir=DRAFT202012.create_resource({"type": "integer"}),
+        )
+        validator = validators.Draft202012Validator(
+            {"type": "object"},
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        )
+
+        evolved = validator.evolve(schema={"$ref": "common.json"})
+
+        self.assertEqual(
+            (evolved.is_valid(37), evolved.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_evolve_with_a_new_base_uri_rebases_resolution(self):
+        registry = self.registry_with_common(
+            one=DRAFT202012.create_resource({"type": "integer"}),
+            two=DRAFT202012.create_resource({"type": "string"}),
+        )
+        validator = validators.Draft202012Validator(
+            {"$ref": "common.json"},
+            base_uri="file:///one/root.json",
+            registry=registry,
+        )
+
+        evolved = validator.evolve(base_uri="file:///two/root.json")
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+        self.assertEqual(
+            (evolved.is_valid(37), evolved.is_valid("foo")),
+            (False, True),
+        )
+
+    def test_base_uri_survives_cross_draft_references(self):
+        registry = referencing.Registry().with_resources(
+            [
+                (
+                    "file:///dir/common.json",
+                    referencing.Resource.from_contents(
+                        {
+                            "$schema": "http://json-schema.org/draft-07/schema#",  # noqa: E501
+                            "$ref": "inner.json",
+                        },
+                    ),
+                ),
+                (
+                    "file:///dir/inner.json",
+                    referencing.Resource.from_contents(
+                        {
+                            "$schema": "http://json-schema.org/draft-07/schema#",  # noqa: E501
+                            "type": "integer",
+                        },
+                    ),
+                ),
+            ],
+        )
+        validator = validators.Draft202012Validator(
+            {"$ref": "common.json"},
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        )
+
+        self.assertEqual(
+            (validator.is_valid(37), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_dynamic_scope_extends_to_the_identified_root(self):
+        registry = referencing.Registry().with_resource(
+            "file:///dir/common.json",
+            DRAFT202012.create_resource(
+                {
+                    "$dynamicAnchor": "node",
+                    "type": "object",
+                    "properties": {
+                        "data": True,
+                        "children": {
+                            "type": "array",
+                            "items": {"$dynamicRef": "#node"},
+                        },
+                    },
+                },
+            ),
+        )
+        validator = validators.Draft202012Validator(
+            {
+                "$dynamicAnchor": "node",
+                "$ref": "common.json",
+                "unevaluatedProperties": False,
+            },
+            base_uri="file:///dir/root.json",
+            registry=registry,
+        )
+
+        valid = {"data": 1, "children": [{"data": 2, "children": []}]}
+        invalid = {
+            "data": 1,
+            "children": [{"data": 2, "children": [], "extra": 3}],
+        }
+        self.assertEqual(
+            (validator.is_valid(valid), validator.is_valid(invalid)),
+            (True, False),
+        )
+
+
 class TestRefResolver(TestCase):
 
     base_uri = ""

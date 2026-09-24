@@ -1,6 +1,8 @@
 v4.27.0
 =======
 
+* Add a ``base_uri`` argument to all validators, which identifies the (possibly ``$id``-less) schema being validated with a URI that relative references within it resolve against.
+  An ``$id`` within the schema itself still takes precedence over the provided URI, and the schema is never modified.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
   ``relevance`` no longer considers an error's position amongst its siblings.

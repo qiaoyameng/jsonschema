@@ -240,6 +240,12 @@ def create(
             kw_only=True,
             repr=False,
         )
+        _base_uri: str | None = field(
+            default=None,
+            kw_only=True,
+            repr=False,
+            alias="base_uri",
+        )
         _resolver = field(
             alias="_resolver",
             default=None,
@@ -267,6 +273,11 @@ def create(
                 schema = changes.setdefault("schema", self.schema)
                 NewValidator = validator_for(schema, default=cls)
 
+                if "base_uri" in changes and "_resolver" not in changes:
+                    # Resolution state was derived from the previous
+                    # base URI, so it cannot be reused with the new one.
+                    changes["_resolver"] = None
+
                 for field in fields(cls):  # noqa: F402
                     if not field.init:
                         continue
@@ -285,7 +296,18 @@ def create(
                 if registry is not _REMOTE_WARNING_REGISTRY:
                     registry = SPECIFICATIONS.combine(registry)
                 resource = specification.create_resource(self.schema)
-                self._resolver = registry.resolver_with_root(resource)
+                if self._base_uri is None:
+                    self._resolver = registry.resolver_with_root(resource)
+                else:
+                    # Identify the root resource by the provided base URI,
+                    # which relative references within it resolve against.
+                    # An $id within the schema itself still takes precedence
+                    # over the provided URI, as do $ids in any subschemas.
+                    base_uri = urldefrag(self._base_uri)[0]
+                    registry = registry.with_resource(base_uri, resource)
+                    self._resolver = registry.resolver(
+                        base_uri=resource.id() or base_uri,
+                    )
 
             if self.schema is True or self.schema is False:
                 self._validators = []
@@ -339,6 +361,11 @@ def create(
         def evolve(self, **changes):
             schema = changes.setdefault("schema", self.schema)
             NewValidator = validator_for(schema, default=self.__class__)
+
+            if "base_uri" in changes and "_resolver" not in changes:
+                # Resolution state was derived from the previous
+                # base URI, so it cannot be reused with the new one.
+                changes["_resolver"] = None
 
             for (attr_name, init_name) in evolve_fields:
                 if init_name not in changes:
