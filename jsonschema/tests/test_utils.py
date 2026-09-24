@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from math import nan
 from unittest import TestCase
 
-from jsonschema._utils import equal, uniq
+from jsonschema._utils import equal, find_duplicate_indices, uniq
 
 
 class Unhashable:
@@ -13,6 +13,24 @@ class Unhashable:
 
     def __eq__(self, other):
         return isinstance(other, Unhashable) and self.value == other.value
+
+
+class EqCounter:
+    """
+    A hashable scalar which counts how often it is compared for equality.
+    """
+
+    calls = 0
+
+    def __init__(self, value):
+        self.value = value
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __eq__(self, other):
+        type(self).calls += 1
+        return isinstance(other, EqCounter) and self.value == other.value
 
 
 class TestEqual(TestCase):
@@ -223,3 +241,87 @@ class TestUniq(TestCase):
         self.assertTrue(
             uniq([{"k": Unhashable(1)}, {"k": Unhashable(2)}]),
         )
+
+
+class TestFindDuplicateIndices(TestCase):
+    def test_no_duplicates(self):
+        self.assertEqual(find_duplicate_indices([1, 2, 3]), [])
+        self.assertEqual(find_duplicate_indices([]), [])
+
+    def test_groups_ordered_by_first_occurrence(self):
+        self.assertEqual(
+            find_duplicate_indices([5, 1, 5, 2, 1, 1]),
+            [[0, 2], [1, 4, 5]],
+        )
+
+    def test_bool_and_int_do_not_merge_but_int_and_float_do(self):
+        self.assertEqual(find_duplicate_indices([True, 1, False, 0]), [])
+        self.assertEqual(find_duplicate_indices([1, 1.0, True]), [[0, 1]])
+        self.assertEqual(find_duplicate_indices([True, 1, True]), [[0, 2]])
+
+    def test_mapping_key_order_is_irrelevant(self):
+        self.assertEqual(
+            find_duplicate_indices([
+                {"a": [1, 2], "b": {"c": 3}},
+                {"b": {"c": 3}, "a": (1, 2)},
+            ]),
+            [[0, 1]],
+        )
+
+    def test_sequence_order_matters(self):
+        self.assertEqual(find_duplicate_indices([[1, 2], [2, 1]]), [])
+        self.assertEqual(find_duplicate_indices([[1, 2], (1, 2)]), [[0, 1]])
+
+    def test_nested_values(self):
+        self.assertEqual(
+            find_duplicate_indices([
+                {"x": [1, {"y": True}]},
+                {"x": [1, {"y": True}]},
+                {"x": [1, {"y": 1}]},
+            ]),
+            [[0, 1]],
+        )
+
+    def test_nan_falls_back(self):
+        self.assertEqual(find_duplicate_indices([nan, 1, nan]), [[0, 2]])
+        self.assertEqual(find_duplicate_indices([nan, -nan]), [])
+
+    def test_unhashable_falls_back(self):
+        self.assertEqual(
+            find_duplicate_indices(
+                [Unhashable(1), "a", Unhashable(2), Unhashable(1)],
+            ),
+            [[0, 3]],
+        )
+
+    def test_unhashable_inside_containers_falls_back(self):
+        self.assertEqual(
+            find_duplicate_indices([
+                [Unhashable(1)],
+                {"k": Unhashable(1)},
+                [Unhashable(1)],
+                {"k": Unhashable(1)},
+            ]),
+            [[0, 2], [1, 3]],
+        )
+
+    def test_hashable_path_does_not_compare_against_fallback_group(self):
+        # A hashable element equal to nothing should never be compared
+        # with fallback-path elements (and vice versa).
+        self.assertEqual(
+            find_duplicate_indices([Unhashable(1), 1, Unhashable(1)]),
+            [[0, 2]],
+        )
+
+    def test_long_hashable_arrays_do_not_degrade_to_quadratic(self):
+        size = 2000
+        instance = [EqCounter(each) for each in range(size)]
+        instance.append(EqCounter(7))  # one duplicate to also find
+
+        EqCounter.calls = 0
+        groups = find_duplicate_indices(instance)
+
+        self.assertEqual(groups, [[7, size]])
+        # Brute force would need ~size**2 / 2 comparisons; the hash-based
+        # path needs at most a small constant per element.
+        self.assertLess(EqCounter.calls, 3 * size)

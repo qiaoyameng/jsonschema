@@ -237,6 +237,49 @@ def uniq(container):
     return True
 
 
+def find_duplicate_indices(container):
+    """
+    Group the indices of a container's elements which are equal to others.
+
+    Equality follows `equal` (JSON Schema value semantics: ``True`` is not
+    ``1``, mapping key order is irrelevant, sequence order matters).
+
+    Returns a list of groups, one per duplicated value, where each group
+    lists the indices of all occurrences of that value in ascending order.
+    Groups themselves are ordered by the first occurrence of their value.
+
+    Values which can be canonically hashed (the common case for JSON
+    instances) are deduplicated via a structural hash compatible with
+    `equal`, costing O(1) per element. Values which cannot -- e.g. NaN, or
+    instances of custom types a ``TypeChecker`` treats as JSON values --
+    fall back to pairwise comparison with `equal`, but only against other
+    unhashable elements.
+    """
+    seen = {}
+    unsupported = []  # (representative, [indices]) groups compared via equal
+
+    for index, element in enumerate(container):
+        key = _uniq_key(element)
+
+        if key is _UNSUPPORTED:
+            for representative, indices in unsupported:
+                if equal(representative, element):
+                    indices.append(index)
+                    break
+            else:
+                unsupported.append((element, [index]))
+            continue
+
+        seen.setdefault(key, []).append(index)
+
+    groups = [indices for indices in seen.values() if len(indices) > 1]
+    groups.extend(
+        indices for _, indices in unsupported if len(indices) > 1
+    )
+    groups.sort(key=lambda indices: indices[0])
+    return groups
+
+
 def find_evaluated_item_indexes_by_schema(validator, instance, schema):
     """
     Get all indexes of items that get evaluated under the current schema.

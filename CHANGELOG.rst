@@ -1,6 +1,8 @@
 v4.27.0
 =======
 
+* ``uniqueItems`` errors now carry a ``duplicate_groups`` attribute grouping the indices of equal elements (ordered by first occurrence), making it easier to locate duplicates in large instances.
+  The error message and validation result are unchanged.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
   ``relevance`` no longer considers an error's position amongst its siblings.

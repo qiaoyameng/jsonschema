@@ -1183,6 +1183,34 @@ class TestValidationErrorDetails(TestCase):
         self.assertEqual(e1.validator, "type")
         self.assertEqual(e2.validator, "minimum")
 
+    def test_uniqueItems(self):
+        instance = [
+            "a",
+            1,
+            "a",
+            True,
+            1,
+            {"b": 1, "c": 2},
+            {"c": 2, "b": 1},
+        ]
+        schema = {"uniqueItems": True}
+
+        validator = validators.Draft4Validator(schema)
+        errors = list(validator.iter_errors(instance))
+        self.assertEqual(len(errors), 1)
+        e = errors[0]
+
+        self.assertEqual(e.validator, "uniqueItems")
+        self.assertEqual(e.message, f"{instance!r} has non-unique elements")
+        self.assertIn("has non-unique elements", str(e))
+        self.assertEqual(
+            e.duplicate_groups,
+            [[0, 2], [1, 4], [5, 6]],
+        )
+
+        self.assertFalse(validator.is_valid(instance))
+        self.assertTrue(validator.is_valid(["a", 1, True, {"b": 1}]))
+
     def test_patternProperties(self):
         instance = {"bar": 1, "foo": 2}
         schema = {
