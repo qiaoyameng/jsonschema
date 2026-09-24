@@ -1,6 +1,9 @@
 v4.27.0
 =======
 
+* Add ``Validator.evaluate``, which evaluates an instance without modifying it and returns an ``EvaluationResult`` carrying the validity, the usual validation errors, and the annotations (``title``, ``description``, ``default``, ``readOnly``, ``writeOnly``) collected from the branches of the schema which the instance successfully validated against.
+  Each annotation records its instance location and its (reference-resolved) schema location.
+
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
   ``relevance`` no longer considers an error's position amongst its siblings.

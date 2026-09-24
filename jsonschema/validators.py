@@ -22,6 +22,7 @@ import referencing.exceptions
 import referencing.jsonschema
 
 from jsonschema import (
+    _evaluate,
     _format,
     _keywords,
     _legacy_keywords,
@@ -450,6 +451,23 @@ def create(
         def validate(self, *args, **kwargs):
             for error in self.iter_errors(*args, **kwargs):
                 raise error
+
+        def evaluate(self, instance):
+            """
+            Evaluate the instance, returning errors and annotations.
+
+            Returns an `jsonschema.EvaluationResult` containing whether
+            the instance is valid, the same errors `iter_errors` would
+            produce, and the annotations (e.g. :kw:`title`,
+            :kw:`description`, :kw:`default`, :kw:`readOnly`,
+            :kw:`writeOnly`) collected from the branches of the schema
+            which the instance successfully validated against.
+
+            Evaluating does not modify the instance, the schema, or
+            this validator -- in particular :kw:`default` values are
+            reported as annotations only, never filled in.
+            """
+            return _evaluate.evaluate(self, instance)
 
         def is_type(self, instance, type):
             try:

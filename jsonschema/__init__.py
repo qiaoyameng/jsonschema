@@ -10,6 +10,7 @@ for you.
 """
 import warnings
 
+from jsonschema._evaluate import Annotation, EvaluationResult
 from jsonschema._format import FormatChecker
 from jsonschema._types import TypeChecker
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -106,12 +107,14 @@ def __getattr__(name):
 
 
 __all__ = [
+    "Annotation",
     "Draft3Validator",
     "Draft4Validator",
     "Draft6Validator",
     "Draft7Validator",
     "Draft201909Validator",
     "Draft202012Validator",
+    "EvaluationResult",
     "FormatChecker",
     "SchemaError",
     "TypeChecker",
