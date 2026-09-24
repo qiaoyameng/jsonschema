@@ -20,6 +20,7 @@ import referencing.exceptions
 from jsonschema import (
     FormatChecker,
     TypeChecker,
+    _utils,
     exceptions,
     protocols,
     validators,
@@ -1834,6 +1835,61 @@ class ValidatorTestMixin(MetaSchemaTestsMixin):
         with self.assertRaises(exceptions.ValidationError) as e:
             TupleValidator({"uniqueItems": True}).validate((1, 1))
         self.assertIn("(1, 1) has non-unique elements", str(e.exception))
+
+    def test_uniqueItems_errors_include_duplicate_indices(self):
+        """
+        uniqueItems errors carry the indices of each duplicated element.
+        """
+        instance = [
+            "a",
+            {"x": 1, "y": [2]},
+            1,
+            "a",
+            {"y": [2], "x": 1},
+            1.0,
+        ]
+        validator = self.Validator({"uniqueItems": True})
+
+        [error] = validator.iter_errors(instance)
+
+        self.assertEqual(
+            error.message, f"{instance!r} has non-unique elements",
+        )
+        self.assertEqual(
+            error.duplicate_indices, [[0, 3], [1, 4], [2, 5]],
+        )
+
+    def test_uniqueItems_duplicate_indices_distinguish_bools(self):
+        """
+        True and 1 are different values, so they are not grouped together.
+        """
+        validator = self.Validator({"uniqueItems": True})
+
+        self.assertEqual(
+            list(validator.iter_errors([True, 1])), [],
+        )
+        [error] = validator.iter_errors([True, 1, True])
+        self.assertEqual(error.duplicate_indices, [[0, 2]])
+
+    def test_uniqueItems_stays_linear_for_long_arrays(self):
+        """
+        Validating uniqueItems does not compare every pair of elements.
+        """
+        instance = list(range(10000)) + [1234]
+        validator = self.Validator({"uniqueItems": True})
+
+        comparisons = []
+        real_equal = _utils.equal
+
+        def counting_equal(one, two):
+            comparisons.append((one, two))
+            return real_equal(one, two)
+
+        with mock.patch.object(_utils, "equal", counting_equal):
+            [error] = validator.iter_errors(instance)
+
+        self.assertEqual(error.duplicate_indices, [[1234, 10000]])
+        self.assertEqual(comparisons, [])
 
     def test_check_redefined_sequence(self):
         """

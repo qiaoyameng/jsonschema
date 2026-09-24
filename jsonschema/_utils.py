@@ -237,6 +237,44 @@ def uniq(container):
     return True
 
 
+def find_duplicate_indices(container):
+    """
+    Find the indices of `equal` elements within a container.
+
+    Returns a list of index groups, one for each value which appears more
+    than once. Groups are ordered by the first occurrence of their value,
+    and each group lists all of the value's indices in ascending order.
+
+    Like `uniq`, uses a structural hash compatible with `equal` for values
+    which can be canonically hashed, falling back to pairwise comparison
+    with `equal` for values which cannot (e.g. NaN, or unhashable custom
+    types a `TypeChecker` may consider arrays).
+    """
+    seen_keys = {}
+    unsupported = []
+
+    for index, element in enumerate(container):
+        key = _uniq_key(element)
+
+        if key is _UNSUPPORTED:
+            for previous, indices in unsupported:
+                if equal(previous, element):
+                    indices.append(index)
+                    break
+            else:
+                unsupported.append((element, [index]))
+            continue
+
+        seen_keys.setdefault(key, []).append(index)
+
+    groups = [indices for _, indices in unsupported if len(indices) > 1]
+    groups.extend(
+        indices for indices in seen_keys.values() if len(indices) > 1
+    )
+    groups.sort(key=lambda indices: indices[0])
+    return groups
+
+
 def find_evaluated_item_indexes_by_schema(validator, instance, schema):
     """
     Get all indexes of items that get evaluated under the current schema.

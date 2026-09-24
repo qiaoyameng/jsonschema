@@ -119,6 +119,14 @@ raised or returned, depending on which method or function is used.
         A validation error which this error is the `context` of.
         ``None`` if there wasn't one.
 
+    .. attribute:: duplicate_indices
+
+        For errors produced by the ``uniqueItems`` keyword, the indices of
+        the duplicated elements, as a list of index groups. Each group
+        contains the indices (in ascending order) at which an equal value
+        appears, and groups are ordered by the first occurrence of their
+        value. Only present on ``uniqueItems`` errors.
+
 
 In case an invalid schema itself is encountered, a `SchemaError` is
 raised.

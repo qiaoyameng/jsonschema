@@ -6,9 +6,9 @@ from jsonschema._utils import (
     equal,
     extras_msg,
     find_additional_properties,
+    find_duplicate_indices,
     find_evaluated_item_indexes_by_schema,
     find_evaluated_property_keys_by_schema,
-    uniq,
 )
 from jsonschema.exceptions import FormatError, ValidationError
 
@@ -204,12 +204,12 @@ def maxItems(validator, mI, instance, schema):
 
 
 def uniqueItems(validator, uI, instance, schema):
-    if (
-        uI
-        and validator.is_type(instance, "array")
-        and not uniq(instance)
-    ):
-        yield ValidationError(f"{instance!r} has non-unique elements")
+    if uI and validator.is_type(instance, "array"):
+        duplicates = find_duplicate_indices(instance)
+        if duplicates:
+            error = ValidationError(f"{instance!r} has non-unique elements")
+            error.duplicate_indices = duplicates
+            yield error
 
 
 def pattern(validator, patrn, instance, schema):
