@@ -1,6 +1,7 @@
 v4.27.0
 =======
 
+* Add an ``evaluate`` method to ``Draft202012Validator`` which, without modifying the instance, returns its validity, the usual validation errors, and the annotations (``title``, ``description``, ``default``, ``readOnly``, ``writeOnly``) collected from the subschemas which successfully applied, each annotated with its instance location and (possibly referenced) schema location.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
   ``relevance`` no longer considers an error's position amongst its siblings.

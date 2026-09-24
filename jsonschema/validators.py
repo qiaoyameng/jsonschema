@@ -22,6 +22,7 @@ import referencing.exceptions
 import referencing.jsonschema
 
 from jsonschema import (
+    _evaluate,
     _format,
     _keywords,
     _legacy_keywords,
@@ -229,6 +230,7 @@ def create(
         ID_OF = staticmethod(id_of)
 
         _APPLICABLE_VALIDATORS = applicable_validators
+        _specification = specification
         _validators = field(init=False, repr=False, eq=False)
 
         schema: referencing.jsonschema.Schema = field(repr=reprlib.repr)
@@ -857,6 +859,8 @@ Draft202012Validator = create(
     format_checker=_format.draft202012_format_checker,
     version="draft2020-12",
 )
+
+Draft202012Validator.evaluate = _evaluate.evaluate
 
 _LATEST_VERSION: type[Validator] = Draft202012Validator
 
