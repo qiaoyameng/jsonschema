@@ -1,6 +1,8 @@
 v4.27.0
 =======
 
+* Add a ``base_uri`` argument to validator classes, which anchors schemas that do not contain an ``$id`` of their own, allowing relative references within them to resolve against a known location (e.g. the file they were loaded from) when using the modern ``referencing.Registry`` interface.
+  An ``$id`` present in the schema itself continues to take precedence, and the schema is never modified.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
   ``relevance`` no longer considers an error's position amongst its siblings.

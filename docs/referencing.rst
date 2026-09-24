@@ -143,6 +143,64 @@ Here for instance is an example which validates that instances are JSON objects 
     validator.validate({"foo": 37})
     assert not validator.is_valid({"foo": -37})  # Uh oh!
 
+.. _base-uri:
+
+Anchoring Schemas Which Have No ``$id``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Schemas loaded from somewhere known -- a file on disk, say -- often do not contain an :kw:`$id` keyword of their own, yet may contain *relative* references like ``{"$ref": "common.json#/$defs/item"}``.
+Resolving such a reference requires knowing what URI the schema itself was loaded from, without modifying the schema to add an :kw:`$id` to it.
+
+Passing ``base_uri`` to a `Validator` provides exactly this starting point for an anonymous root schema:
+
+.. testcode::
+
+    from referencing import Registry
+    from referencing.jsonschema import DRAFT202012
+
+    from jsonschema import Draft202012Validator
+
+    # Two directories, each with their own common.json ...
+    registry = Registry().with_resources(
+        [
+            (
+                "file:///schemas/dir1/common.json",
+                DRAFT202012.create_resource(
+                    {"$defs": {"item": {"type": "integer"}}},
+                ),
+            ),
+            (
+                "file:///schemas/dir2/common.json",
+                DRAFT202012.create_resource(
+                    {"$defs": {"item": {"type": "string"}}},
+                ),
+            ),
+        ],
+    )
+
+    # ... and a root schema with no $id of its own.
+    schema = {"$ref": "common.json#/$defs/item"}
+
+    dir1 = Draft202012Validator(
+        schema, registry=registry, base_uri="file:///schemas/dir1/root.json",
+    )
+    dir2 = Draft202012Validator(
+        schema, registry=registry, base_uri="file:///schemas/dir2/root.json",
+    )
+
+    assert dir1.is_valid(37) and not dir1.is_valid("foo")
+    assert dir2.is_valid("foo") and not dir2.is_valid(37)
+
+Each validator resolves ``common.json`` against its own ``base_uri``, so the two same-named resources stay isolated from one another.
+
+A few rules govern how ``base_uri`` interacts with :kw:`$id`:
+
+    * ``base_uri`` only ever provides the *initial* base URI of the root schema.
+      If the root schema contains its own :kw:`$id`, the :kw:`$id` wins and ``base_uri`` is ignored entirely, as the specification requires.
+    * :kw:`$id` keywords within *subschemas* still rebase references beneath them, exactly as they would without ``base_uri``.
+    * Once a reference crosses into another resource, further relative references within that resource resolve against *that* resource's base URI, not the root's ``base_uri``.
+    * The given URI is normalized before use (dot segments are removed and any fragment is dropped), and the schema itself is never modified.
+
 .. _ref-filesystem:
 
 Resolving References from the File System

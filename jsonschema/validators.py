@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
 from operator import methodcaller
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urldefrag, urljoin, urlsplit
+from urllib.parse import unquote, urldefrag, urljoin, urlsplit, urlunsplit
 from warnings import warn
 import contextlib
 import json
@@ -38,6 +38,52 @@ _UNSET = _utils.Unset()
 
 _VALIDATORS: dict[str, Validator] = {}
 _META_SCHEMAS = _utils.URIDict()
+
+
+def _remove_dot_segments(path: str) -> str:
+    """
+    Remove dot segments from a URI path, per RFC 3986 §5.2.4.
+    """
+    output = []
+    while path:
+        if path.startswith("../"):
+            path = path[3:]
+        elif path.startswith("./"):
+            path = path[2:]
+        elif path.startswith("/./"):
+            path = path[2:]
+        elif path == "/.":
+            path = "/"
+        elif path.startswith("/../"):
+            path = path[3:]
+            if output:
+                output.pop()
+        elif path == "/..":
+            path = "/"
+            if output:
+                output.pop()
+        elif path in (".", ".."):
+            path = ""
+        else:
+            leading = path.startswith("/")
+            head = path[1:] if leading else path
+            segment, separator, rest = head.partition("/")
+            output.append("/" * leading + segment)
+            path = ("/" * leading + rest) if separator else ""
+    return "".join(output)
+
+
+def _normalize_base_uri(uri: str) -> str:
+    """
+    Normalize a base URI for use in reference resolution.
+
+    Any fragment is dropped (a base URI identifies a resource, not a
+    location within one), and dot segments are removed from the path so
+    that relative references resolve to their canonical URIs.
+    """
+    split = urlsplit(urldefrag(uri)[0])
+    path = _remove_dot_segments(split.path)
+    return urlunsplit((split.scheme, split.netloc, path, split.query, ""))
 
 
 def __getattr__(name):
@@ -240,6 +286,11 @@ def create(
             kw_only=True,
             repr=False,
         )
+        _base_uri: str | None = field(
+            default=None,
+            kw_only=True,
+            repr=False,
+        )
         _resolver = field(
             alias="_resolver",
             default=None,
@@ -285,7 +336,12 @@ def create(
                 if registry is not _REMOTE_WARNING_REGISTRY:
                     registry = SPECIFICATIONS.combine(registry)
                 resource = specification.create_resource(self.schema)
-                self._resolver = registry.resolver_with_root(resource)
+                if self._base_uri is not None and resource.id() is None:
+                    base_uri = _normalize_base_uri(self._base_uri)
+                    registry = registry.with_resource(base_uri, resource)
+                    self._resolver = registry.resolver(base_uri=base_uri)
+                else:
+                    self._resolver = registry.resolver_with_root(resource)
 
             if self.schema is True or self.schema is False:
                 self._validators = []

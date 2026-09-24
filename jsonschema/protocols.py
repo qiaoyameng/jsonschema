@@ -54,6 +54,27 @@ class Validator(Protocol):
 
             a schema registry that will be used for looking up JSON references
 
+        base_uri:
+
+            a URI to use as the base URI of the schema when resolving
+            references, if the schema does not declare its own canonical
+            URI via an :kw:`$id` keyword.
+
+            This is useful for schemas which are loaded from a known
+            location (e.g. a file on disk) but which do not contain an
+            :kw:`$id`, as it allows relative references within them to
+            be resolved against the location they were loaded from.
+
+            If the schema *does* contain an :kw:`$id`, the :kw:`$id`
+            takes precedence and this argument is ignored, as required
+            by the specification. Similarly, :kw:`$id` keywords within
+            subschemas continue to rebase references beneath them, and
+            references into other resources resolve further relative
+            references against those resources' own base URIs.
+
+            The schema itself is never modified (no :kw:`$id` is added
+            to it).
+
         resolver:
 
             a resolver that will be used to resolve :kw:`$ref`
@@ -112,6 +133,7 @@ class Validator(Protocol):
         format_checker: jsonschema.FormatChecker | None = None,
         *,
         registry: referencing.jsonschema.SchemaRegistry = ...,
+        base_uri: str | None = None,
     ) -> None: ...
 
     @classmethod

@@ -2333,6 +2333,235 @@ class TestReferencing(TestCase):
         self.assertFalse(w)
 
 
+class TestBaseURI(TestCase):
+    """
+    The ``base_uri`` argument anchors anonymous root schemas.
+
+    Two "directories" (``dir1`` and ``dir2``) each contain a schema named
+    ``common.json`` with *different* contents, so that which one a
+    relative reference resolves to reveals which base URI was in effect.
+    """
+
+    DIR1 = "file:///schemas/dir1/"
+    DIR2 = "file:///schemas/dir2/"
+
+    def setUp(self):
+        self.common1 = {
+            "$id": self.DIR1 + "common.json",
+            "$defs": {"item": {"type": "integer"}},
+        }
+        self.common2 = {
+            "$id": self.DIR2 + "common.json",
+            "$defs": {"item": {"type": "string"}},
+        }
+        self.registry = referencing.Registry().with_resources([
+            (
+                self.DIR1 + "common.json",
+                DRAFT202012.create_resource(self.common1),
+            ),
+            (
+                self.DIR2 + "common.json",
+                DRAFT202012.create_resource(self.common2),
+            ),
+        ])
+        self.schema = {"$ref": "common.json#/$defs/item"}
+
+    def validator(self, schema=None, base_uri=None, **kwargs):
+        if schema is None:
+            schema = self.schema
+        return validators.Draft202012Validator(
+            schema,
+            registry=kwargs.pop("registry", self.registry),
+            base_uri=self.DIR1 + "root.json" if base_uri is None else base_uri,
+            **kwargs,
+        )
+
+    def test_relative_refs_resolve_against_base_uri(self):
+        validator = self.validator()
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_base_uri_isolates_same_named_resources(self):
+        dir1, dir2 = (
+            self.validator(base_uri=directory + "root.json")
+            for directory in (self.DIR1, self.DIR2)
+        )
+        self.assertEqual(
+            (
+                dir1.is_valid(12),
+                dir1.is_valid("foo"),
+                dir2.is_valid(12),
+                dir2.is_valid("foo"),
+            ),
+            (True, False, False, True),
+        )
+
+    def test_base_uri_does_not_modify_the_schema(self):
+        self.validator().validate(12)
+        self.assertEqual(self.schema, {"$ref": "common.json#/$defs/item"})
+
+    def test_base_uri_with_dot_segments_is_normalized(self):
+        validator = self.validator(
+            base_uri=self.DIR1 + "sub/../root.json",
+        )
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_base_uri_with_current_directory_segment_is_normalized(self):
+        validator = self.validator(base_uri=self.DIR1 + "./root.json")
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_base_uri_with_fragment_is_defragmented(self):
+        validator = self.validator(
+            base_uri=self.DIR1 + "root.json#irrelevant",
+        )
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_fragment_only_ref_resolves_against_base_uri(self):
+        schema = {
+            "$defs": {"item": {"type": "integer"}},
+            "$ref": "#/$defs/item",
+        }
+        validator = self.validator(schema=schema)
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_missing_resource_raises_unresolvable(self):
+        validator = self.validator(schema={"$ref": "missing.json"})
+        with self.assertRaises(referencing.exceptions.Unresolvable):
+            validator.validate(12)
+
+    def test_id_in_root_schema_takes_precedence_over_base_uri(self):
+        schema = {
+            "$id": self.DIR2 + "root.json",
+            "$ref": "common.json#/$defs/item",
+        }
+        validator = self.validator(schema=schema)
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (False, True),  # dir2's common.json, not dir1's, was used
+        )
+
+    def test_id_in_subschema_rebases_relative_refs(self):
+        registry = self.registry.with_resource(
+            self.DIR1 + "sub/common.json",
+            DRAFT202012.create_resource({"type": "boolean"}),
+        )
+        schema = {
+            "$defs": {
+                "inner": {"$id": "sub/inner.json", "$ref": "common.json"},
+            },
+            "$ref": "#/$defs/inner",
+        }
+        validator = self.validator(schema=schema, registry=registry)
+        self.assertEqual(
+            (validator.is_valid(True), validator.is_valid(12)),
+            (True, False),
+        )
+
+    def test_referenced_resource_uses_its_own_base_uri(self):
+        common = {
+            "$id": self.DIR2 + "common.json",
+            "$ref": "sibling.json",
+        }
+        sibling = {
+            "$id": self.DIR2 + "sibling.json",
+            "type": "string",
+        }
+        registry = referencing.Registry().with_resources([
+            (self.DIR2 + "common.json", DRAFT202012.create_resource(common)),
+            (self.DIR2 + "sibling.json", DRAFT202012.create_resource(sibling)),
+        ])
+        schema = {"$ref": "../dir2/common.json"}
+        validator = self.validator(schema=schema, registry=registry)
+        self.assertEqual(
+            (validator.is_valid("foo"), validator.is_valid(12)),
+            (True, False),
+        )
+
+    def test_evolve_preserves_base_uri(self):
+        validator = self.validator().evolve(
+            schema={"$ref": "common.json#/$defs/item"},
+        )
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_cross_draft_reference(self):
+        common = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "$id": self.DIR1 + "common.json",
+            "definitions": {"item": {"type": "integer"}},
+        }
+        registry = referencing.Registry().with_resource(
+            self.DIR1 + "common.json",
+            referencing.Resource.from_contents(common),
+        )
+        schema = {"$ref": "common.json#/definitions/item"}
+        validator = self.validator(schema=schema, registry=registry)
+        self.assertEqual(
+            (validator.is_valid(12), validator.is_valid("foo")),
+            (True, False),
+        )
+
+    def test_dynamic_anchor_prefers_the_root_resource(self):
+        common = {
+            "$id": self.DIR1 + "common.json",
+            "$dynamicAnchor": "node",
+            "type": "object",
+            "properties": {"child": {"$dynamicRef": "#node"}},
+        }
+        registry = referencing.Registry().with_resource(
+            self.DIR1 + "common.json",
+            DRAFT202012.create_resource(common),
+        )
+        schema = {
+            "$ref": "common.json",
+            "$defs": {
+                "override": {
+                    "$dynamicAnchor": "node",
+                    "type": "string",
+                },
+            },
+        }
+        validator = self.validator(schema=schema, registry=registry)
+        self.assertEqual(
+            (
+                validator.is_valid({"child": "foo"}),
+                validator.is_valid({"child": {}}),
+            ),
+            (True, False),
+        )
+
+    def test_validate_function_passes_base_uri_through(self):
+        validators.validate(
+            12,
+            self.schema,
+            registry=self.registry,
+            base_uri=self.DIR1 + "root.json",
+        )
+        with self.assertRaises(exceptions.ValidationError):
+            validators.validate(
+                "foo",
+                self.schema,
+                registry=self.registry,
+                base_uri=self.DIR1 + "root.json",
+            )
+
+
 class TestRefResolver(TestCase):
 
     base_uri = ""
