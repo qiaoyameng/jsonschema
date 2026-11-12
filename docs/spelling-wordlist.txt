@@ -58,3 +58,6 @@ HD
 Berman
 Libera
 GPL
+manifest
+sha256
+serialization

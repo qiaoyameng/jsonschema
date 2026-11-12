@@ -1,6 +1,7 @@
 v4.27.0
 =======
 
+* Add ``jsonschema.packaging``, which packs an explicit ``referencing.Registry`` and a root schema into a single JSON document (with a per-resource manifest) for offline delivery, and restores it into a usable registry without any network access.
 * Support for Python 3.10 and 3.11 has been dropped.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
