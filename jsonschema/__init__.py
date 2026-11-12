@@ -11,6 +11,15 @@ for you.
 
 import warnings
 
+from jsonschema._deferred import (
+    DeferredFormatChecker,
+    DeferredFormatError,
+    DeferredValidationError,
+    DeferredValidationResult,
+    FormatCheckPlan,
+    FormatCheckRequest,
+    FormatCheckResult,
+)
 from jsonschema._format import FormatChecker
 from jsonschema._types import TypeChecker
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -113,12 +122,19 @@ def __getattr__(name):
 
 
 __all__ = [
+    "DeferredFormatChecker",
+    "DeferredFormatError",
+    "DeferredValidationError",
+    "DeferredValidationResult",
     "Draft3Validator",
     "Draft4Validator",
     "Draft6Validator",
     "Draft7Validator",
     "Draft201909Validator",
     "Draft202012Validator",
+    "FormatCheckPlan",
+    "FormatCheckRequest",
+    "FormatCheckResult",
     "FormatChecker",
     "SchemaError",
     "TypeChecker",

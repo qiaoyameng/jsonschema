@@ -288,6 +288,57 @@ The supported mechanism for ensuring these dependencies are present is again as 
     :noindex:
     :members:
 
+.. _deferred-formats:
+
+Deferring Format Checks
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Some formats can only be checked by consulting an external directory or
+service (say, to confirm that a domain is currently registered).
+``jsonschema`` never performs that lookup itself -- it makes no network
+requests on your behalf.
+Instead, the deferred protocol splits validation into two explicit steps.
+
+First run the local pass with a `DeferredFormatChecker`, obtaining a
+`FormatCheckPlan`:
+
+.. code:: python
+
+    from jsonschema import DeferredFormatChecker
+    from jsonschema._deferred import prepare
+
+    checker = DeferredFormatChecker(["external-format"])
+    engine, plan = prepare(instance, schema, format_checker=checker)
+
+The plan contains only JSON-compatible data.
+Each `FormatCheckRequest` binds the format name and the JSON path of the
+instance location to a digest of the exact value, and the whole plan binds
+the schema and instance digests.
+Transport it anywhere, and later hand the answers back as
+`FormatCheckResult` objects (again plain data):
+
+.. code:: python
+
+    from jsonschema import FormatCheckResult
+    from jsonschema._deferred import resolve
+
+    results = [
+        FormatCheckResult(id=request.id, conforms=True)
+        for request in plan.checks
+    ]
+    outcome = resolve(instance, schema, plan, results, format_checker=checker)
+
+Missing, duplicated, conflicting, or foreign results are rejected with
+`DeferredFormatError` rather than being silently accepted.
+While results are outstanding the conclusion is ``"pending"``; an unknown
+result is never treated as either a pass or a failure, including inside
+:kw:`anyOf`, :kw:`oneOf`, and :kw:`if` / :kw:`then` / :kw:`else`.
+Replaying the plan never invokes an already-completed local format
+callback again.
+
+The ordinary `FormatChecker` is unchanged and continues to check formats
+entirely synchronously.
+
 
 Format-Specific Notes
 ~~~~~~~~~~~~~~~~~~~~~

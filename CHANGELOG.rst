@@ -1,6 +1,15 @@
 v4.27.0
 =======
 
+* Add an explicit deferred ``format`` protocol (``jsonschema._deferred``) for
+  formats which require an external directory lookup.
+  Local validation first returns a data-only plan of the required checks; the
+  caller supplies their results and obtains the final conclusion.
+  Missing, duplicated, conflicting, or foreign results are rejected, and
+  undecided branches of ``anyOf`` / ``oneOf`` / ``if`` remain pending rather
+  than being treated as a pass or failure.
+  The library performs no network access, and the ordinary ``FormatChecker``
+  is unchanged.
 * Support for Python 3.10 and 3.11 has been dropped.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.
