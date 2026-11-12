@@ -2309,6 +2309,239 @@ class TestValidate(TestCase):
         self.assertIn("12 is less than the minimum of 20", str(e.exception))
 
 
+class TestValidateArrayStream(TestCase):
+    def test_consumes_source_once_and_preserves_item_indexes(self):
+        reads = 0
+
+        def source():
+            nonlocal reads
+            for item in [1, "two", True, "not-a-bool"]:
+                reads += 1
+                yield item
+
+        schema = {
+            "prefixItems": [{"type": "integer"}, {"type": "string"}],
+            "items": {"type": "boolean"},
+        }
+        result = validators.validate_array_stream(source(), schema)
+
+        self.assertTrue(result.complete)
+        self.assertFalse(result.incomplete)
+        self.assertFalse(result.valid)
+        self.assertEqual(reads, 4)
+        self.assertEqual(result.item_count, 4)
+        self.assertEqual(
+            [(error.validator, list(error.path)) for error in result.errors],
+            [("type", [3])],
+        )
+        self.assertEqual(
+            list(result.errors[0].schema_path),
+            ["items", "type"],
+        )
+
+    def test_rejects_unsupported_schema_before_reading_source(self):
+        read = False
+
+        def source():
+            nonlocal read
+            read = True
+            yield 1
+
+        with self.assertRaises(exceptions.SchemaError):
+            validators.validate_array_stream(source(), {"type": "array"})
+        self.assertFalse(read)
+
+    def test_empty_stream_reports_contains_after_normal_eof(self):
+        result = validators.validate_array_stream(
+            iter([]),
+            {"contains": {"type": "integer"}},
+        )
+
+        self.assertTrue(result.complete)
+        self.assertFalse(result.valid)
+        self.assertEqual(result.item_count, 0)
+        self.assertEqual(len(result.errors), 1)
+        self.assertEqual(result.errors[0].validator, "contains")
+        self.assertEqual(list(result.errors[0].path), [])
+
+    def test_min_and_max_items_are_checked_across_the_stream(self):
+        result = validators.validate_array_stream(
+            iter([1, 2, 3]),
+            {"minItems": 4, "maxItems": 2},
+        )
+
+        self.assertTrue(result.complete)
+        self.assertEqual(
+            [error.validator for error in result.errors],
+            ["maxItems", "minItems"],
+        )
+
+    def test_contains_counts_are_concluded_only_at_eof(self):
+        result = validators.validate_array_stream(
+            iter([1, 2, 3]),
+            {
+                "contains": {"type": "integer"},
+                "minContains": 2,
+                "maxContains": 2,
+            },
+        )
+
+        self.assertTrue(result.complete)
+        self.assertEqual(result.contains_count, 3)
+        self.assertEqual(
+            [error.validator for error in result.errors],
+            ["maxContains"],
+        )
+
+        result = validators.validate_array_stream(
+            iter([1]),
+            {"contains": {"type": "integer"}, "minContains": 2},
+        )
+        self.assertEqual(
+            [error.validator for error in result.errors],
+            ["minContains"],
+        )
+
+    def test_unique_items_uses_json_value_equality(self):
+        result = validators.validate_array_stream(
+            iter([True, 1, False, 0]),
+            {"uniqueItems": True},
+        )
+        self.assertTrue(result.valid)
+
+        spilled = validators.validate_array_stream(
+            iter([True, 1]),
+            {"uniqueItems": True},
+            memory_limit=0,
+        )
+        self.assertTrue(spilled.valid)
+        self.assertTrue(spilled.used_temporary_storage)
+
+        result = validators.validate_array_stream(
+            iter(
+                [
+                    {"outer": {"a": [1, True], "b": 2}, "c": None},
+                    {"c": None, "outer": {"b": 2, "a": [1, True]}},
+                ],
+            ),
+            {"uniqueItems": True},
+        )
+        self.assertFalse(result.valid)
+        self.assertEqual(
+            [(error.validator, list(error.path)) for error in result.errors],
+            [("uniqueItems", [1])],
+        )
+
+        spilled_objects = validators.validate_array_stream(
+            iter(
+                [
+                    {"outer": {"a": [1, True], "b": 2}, "c": None},
+                    {"c": None, "outer": {"b": 2, "a": [1, True]}},
+                ],
+            ),
+            {"uniqueItems": True},
+            memory_limit=0,
+        )
+        self.assertFalse(spilled_objects.valid)
+        self.assertTrue(spilled_objects.used_temporary_storage)
+        self.assertEqual(
+            list(spilled_objects.errors[0].path),
+            [1],
+        )
+
+        spilled_varied = validators.validate_array_stream(
+            iter([1, "a much longer string", 1, "a much longer string"]),
+            {"uniqueItems": True},
+            memory_limit=0,
+        )
+        self.assertEqual(
+            [list(error.path) for error in spilled_varied.errors],
+            [[2], [3]],
+        )
+
+    def test_unique_items_spills_to_budgeted_temporary_storage(self):
+        items = [
+            {"id": index, "nested": {"values": [index, {"even": True}]}}
+            for index in range(40)
+        ]
+        items.append(
+            {"nested": {"values": [3, {"even": True}]}, "id": 3},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = validators.validate_array_stream(
+                iter(items),
+                {"uniqueItems": True},
+                memory_limit=256,
+                temp_dir=temp_dir,
+            )
+
+            self.assertTrue(result.complete)
+            self.assertTrue(result.used_temporary_storage)
+            errors = [
+                (error.validator, list(error.path)) for error in result.errors
+            ]
+            self.assertEqual(errors, [("uniqueItems", [40])])
+            self.assertEqual(os.listdir(temp_dir), [])
+
+    def test_spill_threshold_is_accepted_as_memory_alias(self):
+        result = validators.validate_array_stream(
+            iter([1, 2]),
+            {"uniqueItems": True},
+            spill_threshold=0,
+        )
+        self.assertTrue(result.used_temporary_storage)
+
+    def test_source_error_marks_result_incomplete_and_cleans_staging(self):
+        class SourceFailed(Exception):
+            pass
+
+        def source():
+            for index in range(20):
+                yield {"id": index, "nested": {"values": [index]}}
+            raise SourceFailed("no EOF")
+
+        results = []
+        real_run = validators.ArrayStreamValidationResult.run
+
+        def run_and_capture(result):
+            results.append(result)
+            return real_run(result)
+
+        def failing_source():
+            yield from source()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(
+                validators.ArrayStreamValidationResult,
+                "run",
+                run_and_capture,
+            ):
+                with self.assertRaises(SourceFailed) as caught:
+                    validators.validate_array_stream(
+                        failing_source(),
+                        {"uniqueItems": True, "minItems": 30},
+                        memory_limit=128,
+                        temp_dir=temp_dir,
+                    )
+
+            self.assertIs(caught.exception.__class__, SourceFailed)
+            self.assertEqual(len(results), 1)
+            result = results[0]
+            self.assertFalse(result.complete)
+            self.assertTrue(result.incomplete)
+            self.assertIsInstance(result.source_error, SourceFailed)
+            self.assertEqual(result.item_count, 20)
+            self.assertEqual(result.errors, [])
+            self.assertEqual(os.listdir(temp_dir), [])
+
+    def test_validate_still_validates_lists_normally(self):
+        validators.validate([1, 2], {"uniqueItems": True})
+        with self.assertRaises(exceptions.ValidationError) as caught:
+            validators.validate([1, 1], {"uniqueItems": True})
+        self.assertEqual(caught.exception.validator, "uniqueItems")
+
+
 class TestThreading(TestCase):
     """
     Threading-related functionality tests.

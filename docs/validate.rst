@@ -24,6 +24,28 @@ The simplest way to validate an instance under a given schema is to use the `val
    Accepting untrusted schemas as input, especially when combined with untrusted data to validate, can lead to vulnerabilities even when restricting to official JSON Schema dialects and vocabularies.
    Never validate data against schemas from untrusted sources without proper sandboxing or input validation.
 
+Streaming Array Validation
+--------------------------
+
+When an array is available only as a one-pass iterable, use
+`validate_array_stream <jsonschema.validators.validate_array_stream>` to
+validate it without first materializing a list.
+
+.. autofunction:: validate_array_stream
+    :noindex:
+
+.. autoclass:: ArrayStreamValidationResult
+    :noindex:
+    :members:
+
+The initial streaming implementation supports :kw:`items`,
+:kw:`prefixItems`, :kw:`minItems`, :kw:`maxItems`, :kw:`contains`,
+:kw:`minContains`, :kw:`maxContains` and :kw:`uniqueItems`. Other validation
+keywords are rejected before the iterable is consumed. The returned result
+tracks whether the source reached normal EOF, which is required before
+array-wide conclusions such as ``minItems`` or ``contains`` are considered
+complete.
+
 .. _validator-protocol:
 
 The Validator Protocol

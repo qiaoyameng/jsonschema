@@ -23,6 +23,7 @@ import referencing.exceptions
 import referencing.jsonschema
 
 from jsonschema import (
+    _array_stream,
     _format,
     _keywords,
     _legacy_keywords,
@@ -1270,6 +1271,10 @@ def _search_schema(schema, matcher):
             continue
         yield from matcher(value)
         values.extendleft(value.values())
+
+
+validate_array_stream = _array_stream.validate_array_stream
+ArrayStreamValidationResult = _array_stream.ArrayStreamValidationResult
 
 
 def validate(instance, schema, cls=None, *args, **kwargs):  # noqa: D417
