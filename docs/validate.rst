@@ -171,6 +171,60 @@ Draft 2020-12 meta-schema, you could use:
     Draft202012Validator.check_schema(schema)
 
 
+.. _structured-output:
+
+Structured Validation Output
+----------------------------
+
+`~jsonschema.protocols.Validator.iter_errors` and
+`~jsonschema.protocols.Validator.validate` are intended for human-facing
+error reporting.
+When validation results need to be consumed by another system -- for
+example to look up the offending fields in a database -- use
+`~jsonschema.protocols.Validator.output` instead.
+It returns a JSON-serializable `dict` describing *where* validation failed
+using JSON Pointer locations.
+
+The implementation follows the JSON Schema 2020-12 output specification,
+``https://json-schema.org/draft/2020-12/output/schema``.
+Two formats are supported:
+
+``basic``
+    A flat list of output units, each carrying ``valid``,
+    ``keywordLocation``, ``instanceLocation`` and, when the absolute
+    location of the schema resource is known, ``absoluteKeywordLocation``.
+
+``detailed``
+    The same output units, but errors produced by applicator keywords
+    (such as :kw:`anyOf` and :kw:`oneOf`) retain their parent/child
+    relationship.
+
+.. testcode::
+
+    from jsonschema import Draft202012Validator
+
+    validator = Draft202012Validator(
+        {
+            "$id": "https://example.com/schema",
+            "properties": {"name": {"type": "string"}},
+        },
+    )
+    result = validator.output({"name": 12})
+    assert result["valid"] is False
+    unit = result["errors"][0]
+    assert unit["keywordLocation"] == "/properties/name/type"
+    assert unit["instanceLocation"] == "/name"
+
+The output never embeds instance or schema values, and it does not
+synthesize annotations or execution details for branches which validated
+successfully.
+Annotations from unknown or extension keywords are deliberately omitted.
+
+The ``flag``, ``verbose`` and later-specification ``list`` /
+``hierarchical`` formats are *not* provided.
+Use `~jsonschema.protocols.Validator.is_valid` for a simple boolean result.
+
+
 .. _validating formats:
 
 Validating Formats

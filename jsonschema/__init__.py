@@ -12,6 +12,14 @@ for you.
 import warnings
 
 from jsonschema._format import FormatChecker
+from jsonschema._output import (
+    OUTPUT_SPECIFICATION,
+    SUPPORTED_OUTPUT_FORMATS,
+    basic,
+    detailed,
+    basic as basic_output,
+    detailed as detailed_output,
+)
 from jsonschema._types import TypeChecker
 from jsonschema.exceptions import SchemaError, ValidationError
 from jsonschema.validators import (
@@ -22,6 +30,7 @@ from jsonschema.validators import (
     Draft201909Validator,
     Draft202012Validator,
     validate,
+    validate_output,
 )
 
 
@@ -120,8 +129,15 @@ __all__ = [
     "Draft201909Validator",
     "Draft202012Validator",
     "FormatChecker",
+    "OUTPUT_SPECIFICATION",
+    "SUPPORTED_OUTPUT_FORMATS",
     "SchemaError",
     "TypeChecker",
     "ValidationError",
+    "basic",
+    "basic_output",
+    "detailed",
+    "detailed_output",
     "validate",
+    "validate_output",
 ]

@@ -174,6 +174,35 @@ class Validator(Protocol):
 
         """
 
+    def output(
+        self,
+        instance: Any,
+        format: str = "basic",
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Return structured validation output for ``instance``.
+
+        The output follows the JSON Schema 2020-12 output formatting
+        specification.  Supported formats are ``"basic"`` and
+        ``"detailed"``.
+
+        >>> validator = Draft202012Validator({"type": "integer"})
+        >>> validator.output("not an integer")["valid"]
+        False
+
+        """
+
+    def basic_output(self, instance: Any) -> dict[str, Any]:
+        """
+        Return the ``basic`` structured output for ``instance``.
+        """
+
+    def detailed_output(self, instance: Any) -> dict[str, Any]:
+        """
+        Return the ``detailed`` structured output for ``instance``.
+        """
+
     def iter_errors(self, instance: Any) -> Iterable[ValidationError]:
         r"""
         Lazily yield each of the validation errors in the given instance.

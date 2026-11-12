@@ -1,6 +1,15 @@
 v4.27.0
 =======
 
+* Add ``Validator.output`` (and the ``basic_output`` / ``detailed_output``
+  convenience methods) implementing the ``basic`` and ``detailed`` JSON
+  Schema 2020-12 output formats.
+  Results are JSON-serializable dictionaries of
+  ``keywordLocation`` / ``instanceLocation`` / ``absoluteKeywordLocation``
+  values suitable for locating fields in another system, while
+  ``iter_errors`` remains unchanged and ``$ref`` targets keep their own
+  resource identifiers.
+
 * Support for Python 3.10 and 3.11 has been dropped.
 * Improve ``best_match`` for ``anyOf`` / ``oneOf`` errors: the most relevant error is now found within each subschema separately before the deepest of those is picked (#1257, #1300).
   In particular an applicator with a single subschema now produces the same best match as the bare subschema would.

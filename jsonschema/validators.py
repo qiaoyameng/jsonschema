@@ -504,6 +504,66 @@ def create(
             error = next(self.iter_errors(instance), None)
             return error is None
 
+        def output(self, instance, format="basic", output_format=None):
+            """
+            Return structured validation output for ``instance``.
+
+            The output follows the JSON Schema 2020-12 output formatting
+            specification.  The supported ``format`` values are
+            ``"basic"`` (a flat list of output units) and ``"detailed"``
+            (output units nested according to the applicator keywords
+            which produced them).
+
+            The instance's values are never embedded in the output, and
+            no output is synthesized for branches which validated
+            successfully.
+
+            Arguments:
+
+                instance:
+
+                    the instance to validate
+
+                format:
+
+                    one of ``"basic"`` or ``"detailed"``
+
+                output_format:
+
+                    an alias for ``format``
+
+            Returns:
+
+                a JSON-serializable `dict`
+
+            Raises:
+
+                `ValueError`:
+
+                    if an unsupported output format is requested
+            """
+            if output_format is not None:
+                format = output_format
+            from jsonschema import _output
+
+            return _output.output(self, instance, format=format)
+
+        def basic_output(self, instance):
+            """
+            Return ``basic`` structured output for ``instance``.
+            """
+            from jsonschema import _output
+
+            return _output.basic(self, instance)
+
+        def detailed_output(self, instance):
+            """
+            Return ``detailed`` structured output for ``instance``.
+            """
+            from jsonschema import _output
+
+            return _output.detailed(self, instance)
+
     evolve_fields = [
         (field.name, field.alias) for field in fields(Validator) if field.init
     ]
@@ -1340,6 +1400,60 @@ def validate(instance, schema, cls=None, *args, **kwargs):  # noqa: D417
     error = exceptions.best_match(validator.iter_errors(instance))
     if error is not None:
         raise error
+
+
+def output(validator, instance, format="basic"):
+    """
+    Return structured validation output from an existing ``validator``.
+
+    This is a convenience wrapper around
+    `jsonschema.protocols.Validator.output`, for callers which already
+    have a validator instance.
+    """
+    from jsonschema import _output
+
+    return _output.output(validator, instance, format=format)
+
+
+def basic_output(validator, instance):
+    """
+    Return ``basic`` structured validation output for ``instance``.
+    """
+    from jsonschema import _output
+
+    return _output.basic(validator, instance)
+
+
+def detailed_output(validator, instance):
+    """
+    Return ``detailed`` structured validation output for ``instance``.
+    """
+    from jsonschema import _output
+
+    return _output.detailed(validator, instance)
+
+
+def validate_output(
+    instance,
+    schema,
+    cls=None,
+    *args,
+    format="basic",
+    **kwargs,
+):
+    """
+    Validate ``instance`` under ``schema`` and return structured output.
+
+    Unlike `jsonschema.validators.validate`, this function does not raise
+    a `~jsonschema.exceptions.ValidationError` for an invalid instance;
+    instead it returns the requested structured output describing the
+    validation result.
+    """
+    if cls is None:
+        cls = validator_for(schema)
+    cls.check_schema(schema)
+    validator = cls(schema, *args, **kwargs)
+    return validator.output(instance, format=format)
 
 
 def validator_for(
