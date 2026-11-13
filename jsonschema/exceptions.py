@@ -86,6 +86,12 @@ class _Error(Exception):
         self.message = message
         self.path = self.relative_path = deque(path)
         self.schema_path = self.relative_schema_path = deque(schema_path)
+        # ``schema_path`` intentionally keeps its historical behavior (for
+        # example, it does not include ``$ref`` and ``if`` segments).
+        # ``_keyword_path`` is the evaluation path used by the JSON Schema
+        # output formats, and does include those segments.
+        self._keyword_path = deque(schema_path)
+        self._absolute_keyword_location: str | None = None
         self.context = list(context)
         self.cause = self.__cause__ = cause
         self.validator = validator
@@ -169,6 +175,42 @@ class _Error(Exception):
                 escaped_elem = elem.replace("\\", "\\\\").replace("'", r"\'")
                 path += "['" + escaped_elem + "']"
         return path
+
+    def _evaluation_keyword_path(self) -> Sequence[str | int]:
+        """
+        The keyword location of this error, including applicator segments.
+        """
+        parent = self.parent
+        if parent is None:
+            return self._keyword_path
+
+        path = deque(self._keyword_path)
+        path.extendleft(reversed(parent._evaluation_keyword_path()))
+        return path
+
+    @property
+    def keyword_location(self) -> str:
+        """
+        The RFC 6901 JSON Pointer to this error's keyword.
+
+        Unlike `schema_path`, this includes segments such as ``$ref`` and
+        ``if`` which are traversed while evaluating the schema.
+        """
+        return _utils.format_json_pointer(self._evaluation_keyword_path())
+
+    @property
+    def instance_location(self) -> str:
+        """
+        The RFC 6901 JSON Pointer to the offending location in the instance.
+        """
+        return _utils.format_json_pointer(self.absolute_path)
+
+    @property
+    def absolute_keyword_location(self) -> str | None:
+        """
+        The absolute URI of this error's keyword, if it is known.
+        """
+        return self._absolute_keyword_location
 
     def _set(
         self,

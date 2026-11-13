@@ -14,6 +14,15 @@ import warnings
 from jsonschema._format import FormatChecker
 from jsonschema._types import TypeChecker
 from jsonschema.exceptions import SchemaError, ValidationError
+from jsonschema.output import (
+    OUTPUT_SPECIFICATION,
+    OUTPUT_SPECIFICATION_URI,
+    OUTPUT_SPECIFICATION_VERSION,
+    SUPPORTED_OUTPUT_FORMATS,
+    basic_output,
+    detailed_output,
+    flag_output,
+)
 from jsonschema.validators import (
     Draft3Validator,
     Draft4Validator,
@@ -120,8 +129,15 @@ __all__ = [
     "Draft201909Validator",
     "Draft202012Validator",
     "FormatChecker",
+    "OUTPUT_SPECIFICATION",
+    "OUTPUT_SPECIFICATION_URI",
+    "OUTPUT_SPECIFICATION_VERSION",
     "SchemaError",
+    "SUPPORTED_OUTPUT_FORMATS",
     "TypeChecker",
     "ValidationError",
+    "basic_output",
+    "detailed_output",
+    "flag_output",
     "validate",
 ]

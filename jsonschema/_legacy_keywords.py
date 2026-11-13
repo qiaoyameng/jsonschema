@@ -247,6 +247,7 @@ def recursiveRef(validator, recursiveRef, instance, schema):
         instance,
         resolved.contents,
         resolver=resolved.resolver,
+        _absolute_path=(),
     )
 
 

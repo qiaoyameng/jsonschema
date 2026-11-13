@@ -1,5 +1,5 @@
 from collections.abc import Mapping, MutableMapping, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import re
 
 # Module-level sentinels so recursive `_uniq_key` calls produce comparable
@@ -70,6 +70,36 @@ def format_as_index(container, indices):
     if not indices:
         return container
     return f"{container}[{']['.join(repr(index) for index in indices)}]"
+
+
+def format_json_pointer(path):
+    """
+    Format a sequence of path elements as an RFC 6901 JSON Pointer.
+    """
+    if not path:
+        return ""
+    return "".join(
+        "/" + str(element).replace("~", "~0").replace("/", "~1")
+        for element in path
+    )
+
+
+def parse_json_pointer(pointer):
+    """
+    Parse an RFC 6901 JSON Pointer, returning ``None`` if it isn't one.
+
+    The pointer is expected without a leading ``#`` fragment identifier, and
+    URI percent-encoding is decoded before the JSON Pointer escapes.
+    """
+    pointer = unquote(pointer)
+    if pointer == "":
+        return ()
+    if not pointer.startswith("/"):
+        return None
+    return tuple(
+        each.replace("~1", "/").replace("~0", "~")
+        for each in pointer[1:].split("/")
+    )
 
 
 def find_additional_properties(instance, schema):

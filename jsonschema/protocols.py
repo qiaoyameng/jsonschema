@@ -195,6 +195,30 @@ class Validator(Protocol):
             Use `Validator.evolve` instead.
         """
 
+    def flag_output(self, instance: Any) -> dict:
+        """
+        Produce JSON Schema flag output for ``instance``.
+        """
+
+    def basic_output(self, instance: Any) -> dict:
+        """
+        Produce JSON Schema basic output for ``instance``.
+        """
+
+    def detailed_output(self, instance: Any) -> dict:
+        """
+        Produce JSON Schema detailed output for ``instance``.
+
+        Applicator errors retain their child errors in a tree.
+        """
+
+    def output(self, instance: Any, format: str = "basic") -> dict:
+        """
+        Produce output in the given `format`.
+
+        Supported formats are ``flag``, ``basic`` and ``detailed``.
+        """
+
     def validate(self, instance: Any) -> None:
         """
         Check if the instance is valid under the current `schema`.

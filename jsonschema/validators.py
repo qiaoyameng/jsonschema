@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
 from operator import methodcaller
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urldefrag, urljoin, urlsplit
+from urllib.parse import quote, unquote, urldefrag, urljoin, urlsplit
 from warnings import warn
 import contextlib
 import json
@@ -30,6 +30,7 @@ from jsonschema import (
     _typing,
     _utils,
     exceptions,
+    output as _output,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +40,32 @@ _UNSET = _utils.Unset()
 
 _VALIDATORS: dict[str, Validator] = {}
 _META_SCHEMAS = _utils.URIDict()
+
+
+def _resolver_base_uri(resolver):
+    """
+    Get the base URI of a (possibly legacy) resolver.
+    """
+    base = getattr(resolver, "_base_uri", None)
+    if base is None:
+        base = getattr(resolver, "base_uri", None)
+    return urldefrag(base)[0] if base else ""
+
+
+def _format_absolute_keyword_location(base_uri, path):
+    """
+    Format an absolute URI for a keyword, if its base URI is absolute.
+    """
+    base_uri = urldefrag(base_uri)[0]
+    if not base_uri or not urlsplit(base_uri).scheme:
+        return None
+    pointer = _utils.format_json_pointer(path)
+    return base_uri + "#" + quote(pointer, safe="/~!$&'()*+,;=:@?")
+
+
+flag_output = _output.flag
+basic_output = _output.basic
+detailed_output = _output.detailed
 
 
 def __getattr__(name):
@@ -225,6 +252,13 @@ def create(
 
     @define
     class Validator:
+        OUTPUT_SPECIFICATION = _output.OUTPUT_SPECIFICATION
+        OUTPUT_SPECIFICATION_VERSION = _output.OUTPUT_SPECIFICATION_VERSION
+        OUTPUT_SPECIFICATION_URI = _output.OUTPUT_SPECIFICATION_URI
+        SUPPORTED_OUTPUT_FORMATS = _output.SUPPORTED_OUTPUT_FORMATS
+        SUPPORTED_OUTPUT_SPECIFICATION_VERSIONS = (
+            _output.SUPPORTED_OUTPUT_SPECIFICATION_VERSIONS
+        )
         VALIDATORS = dict(validators)  # noqa: RUF012
         META_SCHEMA = dict(meta_schema)  # noqa: RUF012
         TYPE_CHECKER = type_checker
@@ -248,6 +282,18 @@ def create(
             default=None,
             kw_only=True,
             repr=False,
+        )
+        _abs_schema_path = field(
+            default=(),
+            init=False,
+            repr=False,
+            eq=False,
+        )
+        _current_keyword = field(
+            default=None,
+            init=False,
+            repr=False,
+            eq=False,
         )
 
         def __init_subclass__(cls):
@@ -349,6 +395,20 @@ def create(
 
             return NewValidator(**changes)
 
+        def _output_base_uri(self):
+            if self._ref_resolver is not None:
+                return _resolver_base_uri(self._ref_resolver)
+            return _resolver_base_uri(self._resolver)
+
+        def _set_output_location(self, error, path, base_uri=None):
+            if error._absolute_keyword_location is not None:
+                return
+            if base_uri is None:
+                base_uri = self._output_base_uri()
+            error._absolute_keyword_location = (
+                _format_absolute_keyword_location(base_uri, path)
+            )
+
         def iter_errors(self, instance, _schema=None):
             if _schema is not None:
                 warnings.warn(
@@ -372,16 +432,20 @@ def create(
             if _schema is True:
                 return
             elif _schema is False:
-                yield exceptions.ValidationError(
+                error = exceptions.ValidationError(
                     f"False schema does not allow {instance!r}",
                     validator=None,
                     validator_value=None,
                     instance=instance,
                     schema=_schema,
                 )
+                error._keyword_path = deque()
+                self._set_output_location(error, self._abs_schema_path)
+                yield error
                 return
 
             for validator, k, v in validators:
+                self._current_keyword = k
                 errors = validator(self, v, instance, _schema) or ()
                 for error in errors:
                     # set details if not already set by the called fn
@@ -392,8 +456,15 @@ def create(
                         schema=_schema,
                         type_checker=self.TYPE_CHECKER,
                     )
+                    keyword_path = (
+                        tuple(self._abs_schema_path)
+                        + (k,)
+                        + tuple(error._keyword_path)
+                    )
+                    self._set_output_location(error, keyword_path)
                     if k not in {"if", "$ref"}:
                         error.schema_path.appendleft(k)
+                    error._keyword_path.appendleft(k)
                     yield error
 
         def descend(
@@ -403,11 +474,27 @@ def create(
             path=None,
             schema_path=None,
             resolver=None,
+            _absolute_path=None,
         ):
+            if _absolute_path is not None:
+                absolute_path = tuple(_absolute_path)
+            else:
+                absolute_path = tuple(self._abs_schema_path)
+                if (
+                    self._current_keyword is not None
+                    and self._current_keyword != "if"
+                ):
+                    absolute_path += (self._current_keyword,)
+                if schema_path is not None:
+                    absolute_path += (schema_path,)
+
+            if id_of(schema) is not None:
+                absolute_path = ()
+
             if schema is True:
                 return
             elif schema is False:
-                yield exceptions.ValidationError(
+                error = exceptions.ValidationError(
                     f"False schema does not allow {instance!r}",
                     validator=None,
                     validator_value=None,
@@ -416,6 +503,11 @@ def create(
                     path=() if path is None else (path,),
                     schema_path=() if schema_path is None else (schema_path,),
                 )
+                error._keyword_path = deque(
+                    () if schema_path is None else (schema_path,),
+                )
+                self._set_output_location(error, absolute_path)
+                yield error
                 return
 
             if self._ref_resolver is not None:
@@ -427,11 +519,15 @@ def create(
                     )
                 evolved = self.evolve(schema=schema, _resolver=resolver)
 
+            evolved._abs_schema_path = absolute_path
+            base_uri = evolved._output_base_uri()
+
             for k, v in applicable_validators(schema):
                 validator = evolved.VALIDATORS.get(k)
                 if validator is None:
                     continue
 
+                evolved._current_keyword = k
                 errors = validator(evolved, v, instance, schema) or ()
                 for error in errors:
                     # set details if not already set by the called fn
@@ -442,17 +538,101 @@ def create(
                         schema=schema,
                         type_checker=evolved.TYPE_CHECKER,
                     )
+                    keyword_path = (
+                        tuple(absolute_path)
+                        + (k,)
+                        + tuple(error._keyword_path)
+                    )
+                    evolved._set_output_location(error, keyword_path, base_uri)
                     if k not in {"if", "$ref"}:
                         error.schema_path.appendleft(k)
+                    error._keyword_path.appendleft(k)
                     if path is not None:
                         error.path.appendleft(path)
                     if schema_path is not None:
                         error.schema_path.appendleft(schema_path)
+                        error._keyword_path.appendleft(schema_path)
                     yield error
 
         def validate(self, *args, **kwargs):
             for error in self.iter_errors(*args, **kwargs):
                 raise error
+
+        def flag_output(self, instance):
+            """
+            Validate ``instance`` and produce JSON Schema flag output.
+            """
+            from jsonschema import output
+
+            return output.flag(self, instance)
+
+        def basic_output(self, instance, **kwargs):
+            """
+            Validate ``instance`` and produce JSON Schema basic output.
+            """
+            from jsonschema import output
+
+            return output.basic(self, instance, **kwargs)
+
+        def detailed_output(self, instance, **kwargs):
+            """
+            Validate ``instance`` and produce JSON Schema detailed output.
+            """
+            from jsonschema import output
+
+            return output.detailed(self, instance, **kwargs)
+
+        def flag(self, instance):
+            """
+            Alias for `flag_output`.
+            """
+            return self.flag_output(instance)
+
+        def basic(self, instance, **kwargs):
+            """
+            Alias for `basic_output`.
+            """
+            return self.basic_output(instance, **kwargs)
+
+        def detailed(self, instance, **kwargs):
+            """
+            Alias for `detailed_output`.
+            """
+            return self.detailed_output(instance, **kwargs)
+
+        def output_flag(self, instance):
+            """
+            Alias for `flag_output`.
+            """
+            return self.flag_output(instance)
+
+        def output_basic(self, instance, **kwargs):
+            """
+            Alias for `basic_output`.
+            """
+            return self.basic_output(instance, **kwargs)
+
+        def output_detailed(self, instance, **kwargs):
+            """
+            Alias for `detailed_output`.
+            """
+            return self.detailed_output(instance, **kwargs)
+
+        def output(self, instance, format="basic", **kwargs):
+            """
+            Validate ``instance`` and produce the requested output format.
+            """
+            from jsonschema import output
+
+            return output.output(self, instance, format=format, **kwargs)
+
+        def iter_output(self, instance, format="basic", **kwargs):
+            """
+            Iterate over the output units for ``instance``.
+            """
+            from jsonschema import output
+
+            return output.iter_output(self, instance, format=format, **kwargs)
 
         def is_type(self, instance, type):
             try:
@@ -463,6 +643,11 @@ def create(
 
         def _validate_reference(self, ref, instance):
             if self._ref_resolver is None:
+                base_uri = _resolver_base_uri(self._resolver)
+                _, fragment = urldefrag(urljoin(base_uri, ref))
+                absolute_path = _utils.parse_json_pointer(fragment)
+                if absolute_path is None:
+                    absolute_path = ()
                 try:
                     resolved = self._resolver.lookup(ref)
                 except referencing.exceptions.Unresolvable as err:
@@ -472,18 +657,34 @@ def create(
                     instance,
                     resolved.contents,
                     resolver=resolved.resolver,
+                    _absolute_path=absolute_path,
                 )
             else:
+                base_uri = _resolver_base_uri(self._ref_resolver)
+                _, fragment = urldefrag(urljoin(base_uri, ref))
+                absolute_path = _utils.parse_json_pointer(fragment)
+                if absolute_path is None:
+                    absolute_path = ()
                 resolve = getattr(self._ref_resolver, "resolve", None)
                 if resolve is None:
                     with self._ref_resolver.resolving(ref) as resolved:
-                        return self.descend(instance, resolved)
+                        return self.descend(
+                            instance,
+                            resolved,
+                            _absolute_path=absolute_path,
+                        )
                 else:
                     scope, resolved = resolve(ref)
                     self._ref_resolver.push_scope(scope)
 
                     try:
-                        return list(self.descend(instance, resolved))
+                        return list(
+                            self.descend(
+                                instance,
+                                resolved,
+                                _absolute_path=absolute_path,
+                            ),
+                        )
                     finally:
                         self._ref_resolver.pop_scope()
 

@@ -44,6 +44,36 @@ The Validator Protocol
 All of the `versioned validators <versioned-validators>` that are included with `jsonschema` adhere to the protocol, and any `extensions of these validators <jsonschema.validators.extend>` will as well.
 For more information on `creating <jsonschema.validators.create>` or `extending <jsonschema.validators.extend>` validators see `creating-validators`.
 
+Machine-Readable Output
+-----------------------
+
+The `jsonschema.output` module implements the ``flag``, ``basic`` and
+``detailed`` formats from the JSON Schema 2020-12 output specification.
+The formats are also available directly on validators:
+
+.. testcode::
+
+    from jsonschema import Draft202012Validator
+
+    validator = Draft202012Validator(
+        {
+            "$id": "https://example.com/schema",
+            "properties": {"count": {"type": "integer"}},
+        },
+    )
+    output = validator.basic_output({"count": "many"})
+
+Each error output unit contains ``valid``, ``keywordLocation``,
+``instanceLocation`` and, when a base URI is available,
+``absoluteKeywordLocation``.  ``JSON Pointer`` escaping is applied to all
+locations.  ``detailed`` output keeps the errors from applicators such as
+:kw:`anyOf` in their parent/child tree.
+
+The output formats declare a single validation result and do not embed the
+validated values by default.  Annotations from extension vocabularies, and
+execution information for branches which were not evaluated, are omitted.
+The legacy `Validator.iter_errors` API is unchanged.
+
 Type Checking
 -------------
 
